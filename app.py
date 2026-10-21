@@ -6,111 +6,139 @@ from dotenv import load_dotenv
 
 warnings.filterwarnings("ignore")
 
-# Загружаем окружение
 load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
 
-# Настройка страницы в браузере
+if not api_key:
+    st.error("В файле .env не найден GEMINI_API_KEY!")
+    st.stop()
+
+import google.generativeai as genai
+genai.configure(api_key=api_key, transport="rest")
+
+from llama_index.core import SimpleDirectoryReader, PromptTemplate
+from llama_index.core.node_parser import SentenceSplitter
+from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.retrievers.bm25 import BM25Retriever
+from llama_index.llms.gemini import Gemini
+
 st.set_page_config(
     page_title="Помощник первокурсника ИВТ МИЭМ",
     page_icon="🎓",
-    layout="centered"
+    layout="wide"
 )
 
-st.title("🎓 Помощник первокурсника ИВТ МИЭМ")
-st.caption("НИУ ВШЭ • Программы дисциплин 1 курса (2026/2027) • RAG + Gemini")
-
-# Инициализируем RAG-систему один раз (кэшируем, чтобы не пересоздавать при каждом клике)
-@st.cache_resource(show_spinner="Загрузка базы знаний дисциплин...")
+# Кэшируем инициализацию
+@st.cache_resource(show_spinner="Инициализация базы данных...")
 def init_rag():
-    from llama_index.core import SimpleDirectoryReader, PromptTemplate
-    from llama_index.core.node_parser import SentenceSplitter
-    from llama_index.core.query_engine import RetrieverQueryEngine
-    from llama_index.retrievers.bm25 import BM25Retriever
-    from llama_index.llms.gemini import Gemini
-
-    llm = Gemini(model="models/gemini-flash-latest", api_key=api_key)
-    
-    # Считываем наши 25 файлов
+    llm = Gemini(
+        model="models/gemini-flash-lite-latest", 
+        api_key=api_key, 
+        transport="rest",
+        temperature=0.0
+    )
     documents = SimpleDirectoryReader("data").load_data()
-    splitter = SentenceSplitter(chunk_size=1024, chunk_overlap=100)
+    
+    splitter = SentenceSplitter(chunk_size=6000, chunk_overlap=200)
     nodes = splitter.get_nodes_from_documents(documents)
     
     retriever = BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=2)
 
     qa_template_str = (
         "Ты — умный помощник первокурсника ИВТ МИЭМ НИУ ВШЭ по учебным дисциплинам.\n"
-        "Используй ТОЛЬКО приведенный ниже контекст из официальных программ дисциплин.\n"
-        "Сформулируй краткий, точный и понятный ответ на вопрос студента.\n"
-        "Если информации в контексте нет, честно ответь: 'В программе дисциплины нет информации по этому вопросу'.\n\n"
+        "Используй приведенный ниже контекст из официальных программ курсов.\n"
+        "Правила ответа:\n"
+        "1. Сформулируй краткий, точный и понятный ответ на вопрос студента.\n"
+        "2. Отвечай строго по фактам из контекста. Делай естественные логические выводы "
+        "(например: если написано, что все элементы контроля неблокирующие — прямо укажи, что блокирующих элементов нет).\n"
+        "3. Если информации по теме вопроса в контексте действительно нет, честно ответь: "
+        "'В программе дисциплины нет информации по этому вопросу'.\n\n"
         "Контекст:\n{context_str}\n\n"
         "Вопрос: {query_str}\n\n"
         "Ответ:"
     )
     qa_template = PromptTemplate(qa_template_str)
 
-    query_engine = RetrieverQueryEngine.from_args(
+    return RetrieverQueryEngine.from_args(
         retriever=retriever,
         llm=llm,
         text_qa_template=qa_template
     )
-    return query_engine
 
 query_engine = init_rag()
 
-# История сообщений в чате
+with st.sidebar:
+    st.title(" ИВТ МИЭМ 2026/2027")
+    st.markdown("**База знаний:** 25 официальных программ дисциплин 1 курса.")
+    st.markdown("---")
+    st.subheader(" Примеры вопросов:")
+    st.markdown("- Какие элементы контроля входят в Математический анализ?")
+    st.markdown("- Есть ли блокирующие элементы по Алгебре и геометрии?")
+    st.markdown("- Какая формула оценивания по курсу Алгебра и геометрия?")
+    st.markdown("- Кто ведет курс Дискретная математика?")
+    st.markdown("- Есть ли экзамен по Истории России?")
+    st.markdown("---")
+    if st.button("🗑️ Очистить диалог"):
+        st.session_state.messages = []
+        st.rerun()
+
+st.title(" Помощник первокурсника по дисциплинам 1 курса")
+st.caption("НИУ ВШЭ • ИВТ МИЭМ • 2026/2027 учебный год")
+
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Привет! Я твой помощник по дисциплинам 1 курса ИВТ МИЭМ. Спроси меня о формулах оценивания, содержании курсов или литературе!"}
+        {
+            "role": "assistant",
+            "content": "Привет! Я твой помощник по дисциплинам 1 курса ИВТ МИЭМ. Задай вопрос о формулах оценивания, блокирующих экзаменах, преподавателях или содержании предметов!"
+        }
     ]
 
-# Отображаем переписку
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if "sources" in msg and msg["sources"]:
-            with st.expander("📚 Первоисточники"):
+            with st.expander("Использованные первоисточники"):
                 for src in msg["sources"]:
-                    st.markdown(f"- **{src['title']}** [Ссылка на сайт ВШЭ]({src['url']})")
+                    st.markdown(f"- **{src['title']}** — [Открыть на портале ВШЭ]({src['url']})")
 
-# Поле ввода вопроса
-if user_question := st.chat_input("Например: Как оценивается Математический анализ?"):
-    # Сохраняем вопрос пользователя
+if user_question := st.chat_input("Напишите ваш вопрос..."):
     st.session_state.messages.append({"role": "user", "content": user_question})
     with st.chat_message("user"):
         st.markdown(user_question)
 
-    # Генерируем ответ
     with st.chat_message("assistant"):
-        with st.spinner("Ищу информацию в программах дисциплин..."):
-            response = query_engine.query(user_question)
+        with st.spinner("Ищу информацию в программах курсов..."):
+            resp = query_engine.query(user_question)
+
+            unique_files = list(dict.fromkeys([node.metadata.get("file_name") for node in resp.source_nodes if node.metadata.get("file_name")]))
             
-            # Извлекаем ссылки на первоисточники из найденных кусков текста
             sources = []
-            for node in response.source_nodes:
-                text_chunk = node.text
-                # Ищем заголовок и ссылку, которые мы сохраняли в файле
-                match_title = re.search(r"Дисциплина:\s*(.*)", text_chunk)
-                match_url = re.search(r"Источник:\s*(https?://[^\s]+)", text_chunk)
-                
-                title = match_title.group(1).strip() if match_title else node.metadata.get("file_name", "Курс")
-                url = match_url.group(1).strip() if match_url else "https://www.hse.ru/ba/isct/courses"
-                
-                if {"title": title, "url": url} not in sources:
-                    sources.append({"title": title, "url": url})
+            for fname in unique_files:
+                fpath = os.path.join("data", fname)
+                course_title = fname.replace(".txt", "")
+                course_title = re.sub(r"^\d+_", "", course_title)
+                course_url = "https://www.hse.ru/ba/isct/courses"
 
-            # Выводим текст ответа
-            st.markdown(response.response)
-            
-            # Выводим плашку с источниками
+                if os.path.exists(fpath):
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        lines = [f.readline().strip(), f.readline().strip()]
+                        for line in lines:
+                            if line.startswith("Дисциплина:"):
+                                course_title = line.replace("Дисциплина:", "").strip()
+                            elif line.startswith("Источник:"):
+                                course_url = line.replace("Источник:", "").strip()
+
+                sources.append({"title": course_title, "url": course_url})
+
+            st.markdown(resp.response)
+
             if sources:
-                with st.expander("📚 Первоисточники"):
+                with st.expander("Использованные первоисточники"):
                     for src in sources:
-                        st.markdown(f"- **{src['title']}** [Открыть на портале ВШЭ]({src['url']})")
+                        st.markdown(f"- **{src['title']}** — [Открыть на портале ВШЭ]({src['url']})")
 
-            # Запоминаем в истории
             st.session_state.messages.append({
-                "role": "assistant", 
-                "content": response.response,
+                "role": "assistant",
+                "content": resp.response,
                 "sources": sources
             })

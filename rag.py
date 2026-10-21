@@ -17,10 +17,12 @@ from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.retrievers.bm25 import BM25Retriever
 from llama_index.llms.gemini import Gemini
+import google.generativeai as genai
+genai.configure(api_key=api_key, transport="rest")
 
 # 2. Подключаем работающую модель Gemini
 print("[*] Подключаем Gemini...")
-llm = Gemini(model="models/gemini-flash-latest", api_key=api_key)
+llm = Gemini(model="models/gemini-flash-lite-latest", api_key=api_key, transport="rest")
 
 # 3. Читаем все 25 дисциплин из папки data/
 print("[*] Читаем файлы дисциплин из data/...")
