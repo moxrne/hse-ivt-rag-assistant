@@ -27,7 +27,7 @@
 
 
 ```bash
-git clone https://github.com/ваш_логин/hse-ivt-rag-assistant.git
+git clone https://github.com/moxrne/hse-ivt-rag-assistant.git
 cd hse-ivt-rag-assistant
 
 # 2. Создание и активация виртуального окружения
